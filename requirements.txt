@@ -1,0 +1,28 @@
+# Everything needed to run the ingestion pipeline, the agent, the Streamlit UI
+# and the evaluation. Versions pinned to a set verified to work together.
+
+# data pipeline
+langchain==1.4.2
+langchain-community==0.4.2
+langchain-huggingface==1.2.2
+langchain-text-splitters==1.1.2
+chromadb==1.5.9
+langchain-chroma==1.1.0
+sentence-transformers==6.1.0
+pymupdf==1.28.2
+python-dotenv==1.2.2
+pandas
+
+# agent + UI
+langchain-openai==1.4.2
+langgraph==1.2.12
+streamlit
+
+# evaluation. ragas is pinned to 0.2.15: 0.4.x breaks the classic
+# evaluate() API used by eval/run_ragas.py (AnswerRelevancy embeddings bug).
+ragas==0.2.15
+datasets
+
+# optional: NER-based redaction of free-text names on top of the regex layer
+# in src/agent/pii.py. Install it, then run: python -m spacy download en_core_web_sm
+# spacy

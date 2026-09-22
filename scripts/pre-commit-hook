@@ -1,0 +1,8 @@
+#!/bin/sh
+# Git pre-commit hook: blocks a commit that would publish private data or secrets.
+# Install (from the repo root):   copy scripts\pre-commit-hook .git\hooks\pre-commit
+# Needs the project's venv active (or python on PATH) when you run `git commit`.
+python scripts/audit_public_repo.py --staged || {
+  echo "Commit blocked by scripts/audit_public_repo.py (see above)."
+  exit 1
+}

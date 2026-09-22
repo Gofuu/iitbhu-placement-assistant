@@ -1,0 +1,50 @@
+# ---------------------------------------------------------------------------
+# PUBLIC REPO -- nothing private may be committed. Before every push run:
+#     python scripts/audit_public_repo.py
+# (or install it as a pre-commit hook -- see README "Security & privacy").
+# ---------------------------------------------------------------------------
+
+# --- secrets -----------------------------------------------------------------
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.pem
+*.key
+
+# --- private institute data (behind the TnP portal login) --------------------
+# raw exports, parsed text, the vector store and the SQL DB all contain
+# recruiter data and students' forum posts -- they never leave this machine
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+
+# how the private data was exported -- kept local, not published
+scripts/scraping/
+
+# evaluation files built from the private data: the test sets quote exact
+# per-company figures and forum content, the per-question outputs quote
+# retrieved passages. (eval/ragas_results.json -- aggregate scores only -- is
+# safe and IS committed.)
+eval/testset.jsonl
+eval/ragas_testset.jsonl
+eval/ragas_results.csv
+eval/debug_traces.json
+
+# personal working notes
+PROJECT_STATUS.md
+
+# --- python / tooling ----------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.log
+.pytest_cache/
+.ipynb_checkpoints/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
