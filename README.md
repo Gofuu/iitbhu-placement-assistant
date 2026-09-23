@@ -1,5 +1,7 @@
 # IIT (BHU) Placement Assistant
 
+**Live demo:** https://iitbhu-placement.streamlit.app (sign in with Google, 10 free questions a day)
+
 An agentic RAG assistant for IIT (BHU) Varanasi students. Ask about placement and
 internship rules, company CTCs and stipends, eligibility, or what students said about
 a company's interviews. A LangGraph agent routes each question to the right source(s):
