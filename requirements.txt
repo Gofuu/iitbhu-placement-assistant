@@ -13,10 +13,11 @@ pymupdf==1.28.2
 python-dotenv==1.2.2
 pandas
 
-# agent + UI
+# agent + UI (streamlit>=1.42 + Authlib for the Google sign-in on the hosted app)
 langchain-openai==1.4.2
 langgraph==1.2.12
-streamlit
+streamlit>=1.42
+Authlib>=1.3.2
 
 # evaluation. ragas is pinned to 0.2.15: 0.4.x breaks the classic
 # evaluate() API used by eval/run_ragas.py (AnswerRelevancy embeddings bug).

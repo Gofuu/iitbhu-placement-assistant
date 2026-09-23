@@ -7,12 +7,82 @@ Reuses the same LangGraph agent as the CLI (src.agent.graph.build_graph), so the
 UI has all the same behaviour: routing, conversation memory, per-company
 decomposition, guardrails and PII redaction. The compiled graph is cached across
 Streamlit reruns so the (slow) first-time model load happens only once.
+
+Hosted, anyone can use it after signing in with Google, with a daily question
+quota per person (src/app_guard.py), and it downloads its data from a private
+repo on first start (src/data_bootstrap.py). Run locally with no secrets
+configured, it just uses your local data/ with no login.
 """
+import logging
+import uuid
+
 import streamlit as st
 
 from src.agent.graph import build_graph
+from src.app_guard import DEFAULT_DOMAINS, QuotaStore, email_is_allowed
+from src.data_bootstrap import ensure_data
+
+log = logging.getLogger("placement_assistant")
 
 st.set_page_config(page_title="IIT (BHU) Placement Assistant", page_icon="🎓", layout="centered")
+
+
+def secret(key, default=None):
+    """Read a Streamlit secret; locally there may be no secrets file at all."""
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
+# ------------------------------------------------------------------ access gate
+# Fail CLOSED: if this looks like a deployment (it pulls data from the private
+# repo) but sign-in isn't configured, refuse to serve rather than go public.
+auth_on = secret("auth") is not None
+deployed = bool(secret("DATA_REPO"))
+if deployed and not auth_on:
+    st.error("This deployment has no sign-in configured, so it won't serve any data. "
+             "Add the [auth] section to the app's secrets.")
+    st.stop()
+
+user_email = None
+if auth_on:
+    if not st.user.get("is_logged_in", False):
+        st.title("🎓 IIT (BHU) Placement Assistant")
+        st.write("Ask about IIT (BHU) placement and internship rules, company CTCs and "
+                 "stipends, eligibility, and students' interview experiences.")
+        st.caption(f"Sign in with any Google account -- it's only used to give each "
+                   f"person {int(secret('DAILY_LIMIT_PER_USER', 10))} free questions a day.")
+        st.button("Sign in with Google", on_click=st.login, type="primary")
+        st.stop()
+    ok, why = email_is_allowed(st.user.to_dict(),
+                               secret("ALLOWED_EMAIL_DOMAINS", list(DEFAULT_DOMAINS)))
+    if not ok:
+        st.error(f"Access denied: {why}.")
+        st.button("Sign out and use another account", on_click=st.logout)
+        st.stop()
+    user_email = str(st.user.get("email")).lower()
+
+is_admin = (not auth_on) or user_email in {e.lower() for e in secret("ADMIN_EMAILS", [])}
+PER_USER_LIMIT = int(secret("DAILY_LIMIT_PER_USER", 10))
+TOTAL_LIMIT = int(secret("DAILY_LIMIT_TOTAL", 1000))
+
+
+@st.cache_resource(show_spinner="Fetching the placement data (first start only)...")
+def load_data() -> str:
+    return ensure_data(secret("DATA_REPO"), secret("DATA_REPO_TOKEN"), secret("DATA_REPO_REF", "main"))
+
+
+@st.cache_resource
+def get_quota() -> QuotaStore:
+    return QuotaStore()
+
+
+try:
+    load_data()
+except Exception as e:  # message is safe to show: it never contains the token
+    st.error(f"The app couldn't load its data. {e}")
+    st.stop()
 
 
 @st.cache_resource(show_spinner="Loading the placement assistant (first load builds the embedding model)...")
@@ -32,8 +102,12 @@ with st.sidebar:
         "- **Policy** — placement/internship rules, PPO, deadlines"
     )
     st.divider()
-    show_debug = st.toggle("Show route (debug)", value=False,
-                           help="Show which data source the agent used for each answer.")
+    if user_email:
+        left = max(0, PER_USER_LIMIT - get_quota().used(user_email))
+        st.caption(f"Signed in as {user_email}  \n{left} of {PER_USER_LIMIT} questions left today")
+        st.button("Sign out", on_click=st.logout, use_container_width=True)
+    show_debug = is_admin and st.toggle("Show route (debug)", value=False,
+                                        help="Show which data source the agent used for each answer.")
     if st.button("🗑️ Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -80,8 +154,14 @@ for m in st.session_state.messages:
                 st.text(m["evidence"])
 
 
-def answer(user_text: str):
-    """Run one turn through the agent and render the assistant reply."""
+def answer(user_text: str) -> bool:
+    """Run one turn through the agent and render the assistant reply.
+    Returns False (and shows why) if the daily quota blocked it."""
+    if user_email:
+        allowed, why = get_quota().try_consume(user_email, PER_USER_LIMIT, TOTAL_LIMIT)
+        if not allowed:
+            st.warning(why)
+            return False
     st.session_state.messages.append({"role": "user", "content": user_text})
     with st.chat_message("user"):
         st.markdown(user_text)
@@ -104,8 +184,12 @@ def answer(user_text: str):
                 route = result.get("route")
                 sql = result.get("sql_queries") or []
                 evidence = result.get("retrieved_docs") or ""
-            except Exception as e:
-                reply = f"Sorry, something went wrong: `{e}`"
+            except Exception:
+                # details go to the server log only -- raw exception text can
+                # expose internals (queries, paths, provider error payloads)
+                ref = uuid.uuid4().hex[:8]
+                log.exception("agent error (ref %s)", ref)
+                reply = f"Sorry, something went wrong answering that (ref {ref}). Please try again."
                 route = None
                 sql = []
                 evidence = ""
@@ -122,15 +206,16 @@ def answer(user_text: str):
     st.session_state.messages.append(
         {"role": "assistant", "content": reply, "route": route, "sql": sql,
          "evidence": evidence})
+    return True
 
 
 # an example chip was clicked
 if "pending" in st.session_state:
     q = st.session_state.pop("pending")
-    answer(q)
-    st.rerun()
+    if answer(q):
+        st.rerun()
 
 # normal chat input
 if prompt := st.chat_input("Ask about placements, companies, or policy..."):
-    answer(prompt)
-    st.rerun()
+    if answer(prompt):
+        st.rerun()

@@ -107,10 +107,20 @@ using the eval suite plus a step-by-step trace tool (`eval/debug_trace.py`):
 ## Security & privacy
 
 - **No private data in this repo.** The recruiter data and forum posts come from the
-  login-protected Training & Placement portal. They were exported by the author with
-  their own student account, for this personal project. The raw exports, the parsed
-  text, the vector store, the SQL database, the evaluation sets built from them, and
-  the export scripts all stay local (see `.gitignore`).
+  login-protected Training & Placement portal and are used with the TnP cell's
+  permission. The raw exports, the parsed text, the vector store, the SQL database, the
+  evaluation sets built from them, and the export scripts are never committed here
+  (see `.gitignore`).
+- **Usage limits on the hosted app.** Anyone can use it after signing in with Google
+  (any verified account; it can be narrowed to specific domains via
+  `ALLOWED_EMAIL_DOMAINS`). Sign-in exists to make the per-person limit of 10 questions a
+  day enforceable, and there's also an app-wide daily cap, so a public URL can't drain
+  the API budget (`src/app_guard.py`). If a deployment is missing its sign-in config,
+  the app refuses to serve rather than running unlimited.
+- **Data comes from a private repo at startup** (`src/data_bootstrap.py`), fetched with a
+  read-only token kept in the host's secrets. The extractor only writes regular files
+  under `data/`, rejecting path traversal and links. Error messages never include the
+  token, and users never see raw exception text.
 - **`scripts/audit_public_repo.py`** scans exactly what git would commit. It looks for
   private paths, API keys and tokens, phone numbers, emails, roll numbers, student
   handles, and, when the private export is present locally, every real forum poster's
@@ -154,12 +164,45 @@ python -m eval.run_ragas                 # RAGAS metrics     (-n 5 for a quick c
 python -m eval.debug_trace "question"    # every node's output for one question
 ```
 
+## Deployment (Streamlit Community Cloud)
+
+1. **Private data repo.** Run `python scripts/package_private_data.py`. It creates
+   `..\iitbhu-placement-data` with only the files the app reads at runtime. Push that
+   folder to a **private** GitHub repo.
+2. **Read-only token.** On GitHub, create a *fine-grained* personal access token with
+   access to that one repo and *Contents: Read-only*.
+3. **Google sign-in.** In Google Cloud Console, create an OAuth client ID
+   (*Web application*) with the redirect URI `https://<your-app>.streamlit.app/oauth2callback`.
+4. **Deploy.** On share.streamlit.io, create an app from this repo with `app.py` and
+   Python 3.11. Paste the secrets:
+
+```toml
+OPENAI_API_KEY = "sk-..."
+DATA_REPO = "<you>/iitbhu-placement-data"
+DATA_REPO_TOKEN = "github_pat_..."
+ALLOWED_EMAIL_DOMAINS = ["*"]
+ADMIN_EMAILS = ["<you>@itbhu.ac.in"]
+DAILY_LIMIT_PER_USER = 10
+DAILY_LIMIT_TOTAL = 1000
+
+[auth]
+redirect_uri = "https://<your-app>.streamlit.app/oauth2callback"
+cookie_secret = "<long random string>"
+client_id = "<google client id>"
+client_secret = "<google client secret>"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+```
+
+Run locally without secrets, the app skips sign-in and uses your local `data/`.
+
 ## Project layout
 
 ```
-app.py                      Streamlit chat UI
+app.py                      Streamlit chat UI (Google sign-in + daily quota when hosted)
 src/
   config.py                 paths, models, chunking, retrieval settings
+  app_guard.py              sign-in check, per-user daily quota
+  data_bootstrap.py         fetches the private data repo on first start
   agent/
     graph.py                the LangGraph agent (nodes, prompts, checks)
     tools.py                retrieval, rule resolution, company resolution, SQL tools
@@ -173,6 +216,7 @@ eval/
   ragas_results.json        latest aggregate scores
 scripts/
   audit_public_repo.py      pre-publish privacy/secret scan (+ pre-commit-hook)
+  package_private_data.py   builds the private data repo for deployment
   restore_policy_rule_numbers.py
 ```
 
@@ -187,6 +231,5 @@ scripts/
 
 ## Roadmap
 
-- A small synthetic sample dataset, so anyone can run the full pipeline and the test
-  suites without the private data.
-- Docker image and a hosted demo on the synthetic data.
+- A small synthetic sample dataset, so anyone outside IIT (BHU) can run the pipeline and
+  the test suites without the private data.
